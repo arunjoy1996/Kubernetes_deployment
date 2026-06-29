@@ -1,6 +1,6 @@
 # Kubernetes Migration Guide using Kind
 
-Yes! It is completely possible to convert the Docker Compose stack into a **Kubernetes setup using Kind (Kubernetes in Docker) with 1 control-plane and 1 worker node**. 
+**Kubernetes setup using Kind (Kubernetes in Docker) with 1 control-plane and 1 worker node**. 
 
 To make this transition easy, we have created the complete set of Kubernetes manifests and automation scripts under a new [kubernetes](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes) directory:
 
