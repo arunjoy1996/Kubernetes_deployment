@@ -2,18 +2,18 @@
 
 **Kubernetes setup using Kind (Kubernetes in Docker) with 1 control-plane and 1 worker node**. 
 
-Added the complete set of Kubernetes manifests and automation scripts under a new [kubernetes](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes) directory:
+Added the complete set of Kubernetes manifests and automation scripts under a new [kubernetes] directory:
 
-- [kind-config.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/kind-config.yaml) — Cluster configuration
-- [ml-api.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/ml-api.yaml) — Backend Deployment & Service mapping
-- [nginx.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/nginx.yaml) — Frontend & Reverse Proxy
-- [prometheus.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/prometheus.yaml) — Monitoring & Configuration
-- [grafana.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/grafana.yaml) — Visualization & Datasources
-- [loki.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/loki.yaml) — Log Aggregation storage
-- [promtail.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/promtail.yaml) — Kubernetes Pod Log collection
-- [cadvisor.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/cadvisor.yaml) — Container resource metrics
-- [deploy.sh](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/deploy.sh) — Bash deployment automation
-- [deploy.ps1](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/deploy.ps1) — PowerShell deployment automation
+- [kind-config.yaml] — Cluster configuration
+- [ml-api.yaml] — Backend Deployment & Service mapping
+- [nginx.yaml] — Frontend & Reverse Proxy
+- [prometheus.yaml] — Monitoring & Configuration
+- [grafana.yaml] — Visualization & Datasources
+- [loki.yaml] — Log Aggregation storage
+- [promtail.yaml] — Kubernetes Pod Log collection
+- [cadvisor.yaml] — Container resource metrics
+- [deploy.sh] — Bash deployment automation
+- [deploy.ps1] — PowerShell deployment automation
 
 ---
 
