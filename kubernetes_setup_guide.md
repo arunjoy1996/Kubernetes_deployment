@@ -2,7 +2,7 @@
 
 **Kubernetes setup using Kind (Kubernetes in Docker) with 1 control-plane and 1 worker node**. 
 
-To make this transition easy, we have created the complete set of Kubernetes manifests and automation scripts under a new [kubernetes](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes) directory:
+Added the complete set of Kubernetes manifests and automation scripts under a new [kubernetes](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes) directory:
 
 - [kind-config.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/kind-config.yaml) — Cluster configuration
 - [ml-api.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/ml-api.yaml) — Backend Deployment & Service mapping
