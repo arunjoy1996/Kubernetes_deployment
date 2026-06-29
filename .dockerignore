@@ -1,0 +1,6 @@
+model/MNIST
+__pycache__
+.git
+.gitignore
+.vscode
+venv/

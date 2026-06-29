@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+scikit-learn
+numpy
+pydantic
+pytest
+pytest-asyncio
+prometheus-client
+python-json-logger==2.0.7  # Add for structured logging

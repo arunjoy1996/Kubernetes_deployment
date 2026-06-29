@@ -1,0 +1,17 @@
+# kubernetes/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  # Map host port 80 to NodePort 30080 (Nginx Frontend)
+  - containerPort: 30080
+    hostPort: 80
+    listenAddress: "127.0.0.1"
+    protocol: TCP
+  # Map host port 3000 to NodePort 30300 (Grafana Dashboard)
+  - containerPort: 30300
+    hostPort: 3000
+    listenAddress: "127.0.0.1"
+    protocol: TCP
+- role: worker
