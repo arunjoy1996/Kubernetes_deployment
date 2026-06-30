@@ -4,6 +4,8 @@ serviceAccount:
   name: "jenkins-admin"  # Must match the name in jenkins-rbac.yaml
 
 controller:
+  javaOpts: >-
+    -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.LAUNCH_DIAGNOSTICS=true
   componentName: "jenkins-controller"
   image:
     registry: docker.io
