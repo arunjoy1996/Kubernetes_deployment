@@ -1,0 +1,1834 @@
+
+================================================================================
+# .\.dockerignore
+================================================================================
+
+model/MNIST
+__pycache__
+.git
+.gitignore
+.vscode
+venv/
+
+
+================================================================================
+# .\.gitignore
+================================================================================
+
+# Virtual environments
+venv/
+
+# Python cache
+__pycache__/
+
+
+
+
+
+================================================================================
+# .\Dockerfile
+================================================================================
+
+FROM python:3.10
+
+WORKDIR /app
+
+COPY api/requirements.txt .
+
+# Ensure Python output is unbuffered so build logs appear promptly
+ENV PYTHONUNBUFFERED=1
+
+# Use the Python interpreter's -u flag when invoking pip to avoid an invalid pip option
+RUN python -u -m pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+COPY model /app/model
+
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+================================================================================
+# .\Jenkinsfile
+================================================================================
+
+pipeline {
+    agent {
+        label 'jenkins-agent'
+    }
+
+    stages {
+        stage('Cleanup') {
+            steps {
+                deleteDir()   // remove old files
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                checkout scm   // ✅ bring back repo
+            }
+        }
+
+        stage('Debug') {
+            steps {
+                sh 'ls -la'   // should show project structure
+            }
+        }
+
+        stage('Test') {
+            steps {
+                container('python') {
+                    sh '''
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    export PYTHONPATH=$PWD
+                    pip install -r requirements.txt
+                    pytest tests/
+                    '''
+                }
+            }
+        }
+
+        stage('Build & Push') {
+            steps {
+                container('docker') {
+                    withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                        echo "Logging in to Docker Hub..."
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+
+                        echo "Building Docker images..."
+                        docker build -t "$DOCKER_USER/ml-api:latest" .
+                        docker build -t "$DOCKER_USER/nginx-frontend:latest" -f nginx/Dockerfile .
+
+                        echo "Pushing images to Docker Hub..."
+                        docker push "$DOCKER_USER/ml-api:latest"
+                        docker push "$DOCKER_USER/nginx-frontend:latest"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                container('kubectl') {
+                    withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                        echo "Updating manifests with Docker Hub images..."
+                        sed -i "s|image: ml-api:latest|image: ${DOCKER_USER}/ml-api:latest|g" kubernetes/ml-api.yaml
+                        sed -i "s|image: nginx-frontend:latest|image: ${DOCKER_USER}/nginx-frontend:latest|g" kubernetes/nginx.yaml
+
+                        echo "Applying Kubernetes manifests..."
+                        kubectl apply -f kubernetes/ml-api.yaml
+                        kubectl apply -f kubernetes/nginx.yaml
+                        kubectl apply -f kubernetes/prometheus.yaml
+                        kubectl apply -f kubernetes/loki.yaml
+                        kubectl apply -f kubernetes/promtail.yaml
+                        kubectl apply -f kubernetes/grafana.yaml
+                        kubectl apply -f kubernetes/cadvisor.yaml
+
+                        echo "Waiting for deployments to roll out..."
+                        kubectl rollout status deployment/ml-api
+                        kubectl rollout status deployment/nginx
+                        '''
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+================================================================================
+# .\kubernetes_setup_guide.md
+================================================================================
+
+# Kubernetes Migration Guide using Kind
+
+**Kubernetes setup using Kind (Kubernetes in Docker) with 1 control-plane and 1 worker node**. 
+
+Added the complete set of Kubernetes manifests and automation scripts under a new [kubernetes](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes) directory:
+
+- [kind-config.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/kind-config.yaml) — Cluster configuration
+- [ml-api.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/ml-api.yaml) — Backend Deployment & Service mapping
+- [nginx.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/nginx.yaml) — Frontend & Reverse Proxy
+- [prometheus.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/prometheus.yaml) — Monitoring & Configuration
+- [grafana.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/grafana.yaml) — Visualization & Datasources
+- [loki.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/loki.yaml) — Log Aggregation storage
+- [promtail.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/promtail.yaml) — Kubernetes Pod Log collection
+- [cadvisor.yaml](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/cadvisor.yaml) — Container resource metrics
+- [deploy.sh](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/deploy.sh) — Bash deployment automation
+- [deploy.ps1](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment/kubernetes/deploy.ps1) — PowerShell deployment automation
+
+---
+
+## 🏗️ Architectural Mapping: Docker Compose vs. Kubernetes
+
+Here is how each Docker Compose component was translated into Kubernetes standards:
+
+| Docker Compose Service | Kubernetes Resource Type | Translation Design |
+| :--- | :--- | :--- |
+| **`backend` (ml-api)** | `Deployment` + `Service` (ClusterIP) | Deploys backend API. Exposed internally as two services: `ml-api` (for Prometheus) and `backend` (for Nginx) to preserve existing config names. |
+| **`nginx`** | `Deployment` + `Service` (NodePort) | Deploys Nginx container with static frontend baked in. Port `80` is exposed as a NodePort (`30080`), mapped directly to host port `80` via Kind. |
+| **`prometheus`** | `Deployment` + `ConfigMap` + `PVC` | Raw `prometheus.yml` configuration is injected as a `ConfigMap`. Scrapes metric targets using Kubernetes local DNS. Data persists via a `PersistentVolumeClaim`. |
+| **`grafana`** | `Deployment` + `ConfigMap` + `PVC` | Provisioned datasources (Loki & Prometheus) are loaded via a `ConfigMap`. Dashboard configuration and settings persist in a `PVC`. |
+| **`loki`** | `Deployment` + `ConfigMap` + `PVC` | Deploys Loki. Local log storage is backed by a `PVC` with customized `fsGroup` permissions. |
+| **`promtail`** | `DaemonSet` + `ConfigMap` + `RBAC` | Unlike Docker Compose, Promtail runs as a `DaemonSet` on every node to scrape `/var/log/pods` directory. Configured with a `ServiceAccount` and `ClusterRole` to fetch pod metadata from the API server. |
+| **`cadvisor`** | `DaemonSet` + `Service` | Runs on every node to mount host root paths (`/sys`, `/var/run`, `/var/lib/docker`) to expose container-level resource statistics to Prometheus. |
+
+---
+
+## ⚙️ Key Kubernetes & Kind Adaptations
+
+### 1. Host Port Access with Kind Port Mapping
+Since Kubernetes runs inside containerized nodes under Kind, standard Service ports aren't automatically reachable on your local Windows host. We solve this by adding `extraPortMappings` to the **control-plane** node in `kind-config.yaml`:
+```yaml
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - containerPort: 30080  # NodePort of Nginx Service
+    hostPort: 80          # Accessible on host at http://localhost
+  - containerPort: 30300  # NodePort of Grafana Service
+    hostPort: 3000        # Accessible on host at http://localhost:3000
+- role: worker
+```
+
+### 2. Log Scrape configuration for Promtail
+In Docker Compose, Promtail watched the host Docker socket (`/var/run/docker.sock`). In Kubernetes, logs are collected from the node's standard pod path (`/var/log/pods/*/*/*.log`). The `promtail.yaml` includes a custom `scrape_config` that translates pod metadata (labels like `app` and `service`) into Loki indexing labels.
+
+### 3. Persistent Volumes
+Docker Compose volume definitions (`grafana-data`, `prometheus-data`, `loki-data`) are mapped to Kubernetes **PersistentVolumeClaims (PVCs)**. Kind cluster nodes use the default local-path provisioner to automatically bind these PVCs to directories on the nodes.
+
+---
+
+## 🚀 How to Run the Kubernetes Setup
+
+> [!IMPORTANT]
+> Ensure **Docker Desktop** (or Docker daemon) is running and the `kind` and `kubectl` CLIs are installed.
+
+### Using Bash (WSL, Git Bash, macOS/Linux)
+1. Make the script executable:
+   ```bash
+   chmod +x kubernetes/deploy.sh
+   ```
+2. Run the deployment:
+   ```bash
+   ./kubernetes/deploy.sh
+   ```
+
+### Using PowerShell (Windows Native)
+1. Run the script:
+   ```powershell
+   .\kubernetes\deploy.ps1
+   ```
+
+Once deployed, the scripts will wait for all Pods to become healthy. You will be able to access:
+- **Web App UI:** [http://localhost](http://localhost)
+- **Grafana Dashboard:** [http://localhost:3000](http://localhost:3000)
+- **Jenkins CI/CD:** [http://localhost:8080](http://localhost:8080) (Log in with username `admin` and password `admin`)
+
+---
+
+## 🧑‍💻 Jenkins CI/CD Pipeline Setup
+
+Jenkins is deployed automatically using the official Helm chart inside the `jenkins` namespace. It is configured to run stages inside dynamic Kubernetes agent pods.
+
+### 1. Configure Docker Hub Credentials
+Before triggering the pipeline (or before running the deployment scripts if you want the credentials ready immediately), create a Kubernetes Secret containing your Docker Hub credentials. Jenkins JCasC will automatically read this secret to configure the credentials in the Jenkins credentials store:
+
+```bash
+# Create the jenkins namespace if it doesn't exist yet
+kubectl create namespace jenkins
+
+# Create the docker-hub-creds secret
+kubectl create secret generic docker-hub-creds \
+  --namespace jenkins \
+  --from-literal=username='YOUR_DOCKER_HUB_USERNAME' \
+  --from-literal=password='YOUR_DOCKER_HUB_PASSWORD_OR_TOKEN'
+```
+
+### 2. How the Pipeline Works
+The [Jenkinsfile](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment_Jenkins/Jenkinsfile) is fully automated to run on a multi-container Kubernetes agent pod (`jenkins-agent`):
+1. **`Test` Stage**: Runs inside a `python` container to install dependencies and execute `pytest` tests.
+2. **`Build & Push` Stage**: Runs inside a `docker` container. It mounts the host's Docker socket to build the images using the host's Docker daemon, logs in to Docker Hub, and pushes them to your Docker Hub repository.
+3. **`Deploy` Stage**: Runs inside a `kubectl` container. It dynamically updates the image references in the Kubernetes manifests (`ml-api.yaml` and `nginx.yaml`) with your Docker Hub username and applies them to the cluster.
+
+### 3. Create the Jenkins Job
+1. Open [http://localhost:8080](http://localhost:8080) and log in using:
+   - **Username:** `admin`
+   - **Password:** `admin`
+2. Click on **New Item**.
+3. Enter a name (e.g., `ml-pipeline`), select **Pipeline**, and click **OK**.
+4. Scroll down to the **Pipeline** section:
+   - **Definition:** Select **Pipeline script from SCM**.
+   - **SCM:** Select **Git**.
+   - **Repository URL:** Enter the path to your repository (or your remote Git URL).
+   - **Branch Specifier:** Set to `*/main` (or whichever branch you are using).
+   - **Script Path:** Ensure it is set to `Jenkinsfile`.
+5. Click **Save** and then click **Build Now** to run the pipeline!
+
+
+
+
+================================================================================
+# .\requirements.txt
+================================================================================
+
+fastapi
+uvicorn
+numpy
+pydantic
+pytest
+pytest-asyncio
+httpx
+scikit-learn
+prometheus-client
+
+
+================================================================================
+# .\text_converter.py
+================================================================================
+
+import os
+
+EXCLUDE = {".git", "__pycache__", "node_modules"}
+OUTPUT_FILE = "repository_dump.txt"
+
+with open(OUTPUT_FILE, "w", encoding="utf-8") as out:
+    for root, dirs, files in os.walk("."):
+        dirs[:] = [d for d in dirs if d not in EXCLUDE]
+
+        for file in files:
+            path = os.path.join(root, file)
+
+            # Skip the output file itself
+            if os.path.abspath(path) == os.path.abspath(OUTPUT_FILE):
+                continue
+
+            out.write(f"\n{'=' * 80}\n")
+            out.write(f"# {path}\n")
+            out.write(f"{'=' * 80}\n\n")
+
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    out.write(f.read())
+            except Exception:
+                out.write("<binary file>")
+
+            out.write("\n\n")
+
+print(f"Repository contents written to {OUTPUT_FILE}")
+
+
+================================================================================
+# .\api\main.py
+================================================================================
+
+# api/main.py
+from fastapi import FastAPI, HTTPException, Request
+import numpy as np
+from api.model_loader import model
+from api.schema import ImageInput
+import logging
+import json
+import time
+from datetime import datetime
+import uuid
+
+# Prometheus imports
+from prometheus_client import Counter, Histogram, generate_latest
+from starlette.responses import Response
+
+# Set up structured JSON logging
+class CustomJsonFormatter(logging.Formatter):
+    def format(self, record):
+        log_record = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "level": record.levelname,
+            "service": "ml-api",
+            "trace_id": getattr(record, "trace_id", str(uuid.uuid4())),
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        
+        if hasattr(record, "request_path"):
+            log_record["request_path"] = record.request_path
+        if hasattr(record, "method"):
+            log_record["method"] = record.method
+        if hasattr(record, "status_code"):
+            log_record["status_code"] = record.status_code
+        if hasattr(record, "duration_ms"):
+            log_record["duration_ms"] = record.duration_ms
+            
+        if record.exc_info and record.exc_info[0]:
+            log_record["exception"] = self.formatException(record.exc_info)
+            
+        return json.dumps(log_record)
+
+# Configure logging
+logger = logging.getLogger("ml-api")
+logger.setLevel(logging.INFO)
+
+# Console handler with JSON formatter
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(CustomJsonFormatter())
+logger.addHandler(console_handler)
+
+app = FastAPI()
+
+# Metrics
+REQUEST_COUNT = Counter("api_requests_total", "Total API Requests")
+PREDICT_COUNT = Counter("predict_requests_total", "Total predictions made")
+REQUEST_LATENCY = Histogram("request_latency_seconds", "Request latency")
+ERROR_COUNT = Counter("api_errors_total", "Total errors", ["error_type"])
+
+# Middleware for request logging
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    trace_id = request.headers.get("X-Trace-ID", str(uuid.uuid4()))
+    start_time = time.time()
+    
+    # Log incoming request
+    logger.info(
+        f"Incoming request: {request.method} {request.url.path}",
+        extra={
+            "trace_id": trace_id,
+            "request_path": request.url.path,
+            "method": request.method,
+        }
+    )
+    
+    try:
+        response = await call_next(request)
+        duration = (time.time() - start_time) * 1000
+        
+        # Log successful response
+        logger.info(
+            f"Request completed: {response.status_code}",
+            extra={
+                "trace_id": trace_id,
+                "request_path": request.url.path,
+                "method": request.method,
+                "status_code": response.status_code,
+                "duration_ms": round(duration, 2),
+            }
+        )
+        
+        response.headers["X-Trace-ID"] = trace_id
+        return response
+        
+    except Exception as e:
+        duration = (time.time() - start_time) * 1000
+        logger.error(
+            f"Request failed: {str(e)}",
+            exc_info=True,
+            extra={
+                "trace_id": trace_id,
+                "request_path": request.url.path,
+                "method": request.method,
+                "status_code": 500,
+                "duration_ms": round(duration, 2),
+            }
+        )
+        raise
+
+@app.get("/")
+def home():
+    logger.info("Home endpoint accessed")
+    REQUEST_COUNT.inc()
+    return {"message": "Model API running", "version": "2.0"}
+
+@app.post("/predict")
+def predict(data: ImageInput):
+    REQUEST_COUNT.inc()
+    start_time = time.time()
+    
+    logger.info(f"Prediction request received with {len(data.pixels)} pixels")
+
+    if model is None:
+        ERROR_COUNT.labels(error_type="model_unavailable").inc()
+        logger.error("Model not available")
+        raise HTTPException(status_code=503, detail="Model not available")
+
+    pixels = np.array(data.pixels)
+
+    if pixels.ndim != 1:
+        ERROR_COUNT.labels(error_type="invalid_dimensions").inc()
+        logger.warning(f"Invalid input dimensions: {pixels.ndim}")
+        raise HTTPException(status_code=400, detail="`pixels` must be a flat list of numbers")
+
+    if pixels.size != 64:
+        ERROR_COUNT.labels(error_type="invalid_pixel_count").inc()
+        logger.warning(f"Invalid pixel count: {pixels.size}")
+        raise HTTPException(status_code=400, detail="Expected 64 pixels for 8x8 image")
+
+    try:
+        X = pixels.reshape(1, -1)
+        pred = int(model.predict(X)[0])
+        
+        PREDICT_COUNT.inc()
+        duration = time.time() - start_time
+        REQUEST_LATENCY.observe(duration)
+        
+        logger.info(f"Prediction completed: {pred}, duration: {duration*1000:.2f}ms")
+        
+        return {"prediction": pred}
+        
+    except Exception as e:
+        ERROR_COUNT.labels(error_type="prediction_error").inc()
+        logger.error(f"Prediction failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Prediction failed")
+
+@app.get("/metrics")
+def metrics():
+    logger.debug("Metrics endpoint accessed")
+    return Response(generate_latest(), media_type="text/plain")
+
+
+================================================================================
+# .\api\model_loader.py
+================================================================================
+
+import joblib
+import os
+
+# MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "model", "rf_model.joblib")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "model", "rf_model.joblib")
+MODEL_PATH = os.path.abspath(MODEL_PATH)  # Convert to absolute path
+
+model = None
+if os.path.exists(MODEL_PATH):
+	model = joblib.load(MODEL_PATH)
+	print("Model loaded successfully from:", MODEL_PATH)
+else:
+	# Placeholder if model not yet trained
+	model = None
+	print("Model file not found at:", MODEL_PATH)
+
+
+
+================================================================================
+# .\api\requirements.txt
+================================================================================
+
+fastapi
+uvicorn
+scikit-learn
+numpy
+pydantic
+pytest
+pytest-asyncio
+prometheus-client
+python-json-logger==2.0.7  # Add for structured logging
+
+
+================================================================================
+# .\api\schema.py
+================================================================================
+
+from pydantic import BaseModel
+from typing import List
+
+class ImageInput(BaseModel):
+    pixels: List[float]
+
+
+================================================================================
+# .\api\__init__.py
+================================================================================
+
+
+
+
+================================================================================
+# .\frontend\index.html
+================================================================================
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Digit Classifier</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+ 
+  <h1>Draw a Digit</h1>
+
+  <canvas id="canvas" width="280" height="280"></canvas>
+  
+  <br>
+  <button onclick="predict()">Predict</button>
+  <button onclick="clearCanvas()">Clear</button>
+
+  <p id="result"></p>
+
+  <script src="script.js"></script>
+</body>
+</html>
+
+
+
+================================================================================
+# .\frontend\script.js
+================================================================================
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+// Initialize canvas
+ctx.fillStyle = "white";
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.fillStyle = "black";
+
+let drawing = false;
+let prev = null;
+
+canvas.onmousedown = (e) => {
+  drawing = true;
+  prev = { x: e.offsetX, y: e.offsetY };
+};
+
+canvas.onmouseup = () => {
+  drawing = false;
+  prev = null;
+};
+
+canvas.onmouseleave = () => {
+  drawing = false;
+  prev = null;
+};
+
+canvas.onmousemove = (e) => {
+  if (!drawing || !prev) return;  // ✅ important fix
+
+  ctx.beginPath();
+  ctx.moveTo(prev.x, prev.y);
+  ctx.lineTo(e.offsetX, e.offsetY);
+
+  ctx.strokeStyle = "black";
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+
+  ctx.stroke();
+
+  prev = { x: e.offsetX, y: e.offsetY };
+};
+
+function predict() {
+  const small = document.createElement("canvas");
+  small.width = 8;
+  small.height = 8;
+
+  const sctx = small.getContext("2d");
+  sctx.fillStyle = "white";
+  sctx.fillRect(0, 0, 8, 8);
+
+  
+const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+const data = imgData.data;
+
+let minX = canvas.width, minY = canvas.height;
+let maxX = 0, maxY = 0;
+
+// Find bounding box of drawing
+for (let y = 0; y < canvas.height; y++) {
+  for (let x = 0; x < canvas.width; x++) {
+    const i = (y * canvas.width + x) * 4;
+    const val = data[i]; // red channel
+
+    if (val < 200) { // not white
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+}
+
+  // Padding
+  const padding = 10;
+  minX = Math.max(minX - padding, 0);
+  minY = Math.max(minY - padding, 0);
+  maxX = Math.min(maxX + padding, canvas.width);
+  maxY = Math.min(maxY + padding, canvas.height);
+  sctx.filter = "blur(0.5px)";
+  // Draw cropped and centered
+  sctx.drawImage(
+    canvas,
+    minX, minY, maxX - minX, maxY - minY,
+    0, 0, 8, 8
+  );
+
+
+  const smallData = sctx.getImageData(0, 0, 8, 8).data;
+const pixels = [];
+
+for (let i = 0; i < smallData.length; i += 4) {
+const r = smallData[i], g = smallData[i+1], b = smallData[i+2];
+    
+    const gray = (r + g + b) / 3 / 255;
+    const v = (1 - gray) * 16;
+    pixels.push(Number(v.toFixed(2)));
+
+  }
+
+  console.log(pixels);
+  console.log("sum:", pixels.reduce((a, b) => a + b, 0));
+
+  fetch("/api/predict?ts=" + Date.now(), {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pixels })
+  })
+  .then(res => res.json())
+  .then(d => {
+    document.getElementById("result").innerText = d.prediction || JSON.stringify(d);
+  });
+}
+
+function clearCanvas() {
+  ctx.fillStyle = "white";
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.strokeStyle = "black";
+}
+
+
+================================================================================
+# .\frontend\style.css
+================================================================================
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f6f9;
+    text-align: center;
+    margin: 0;
+    padding: 0;
+}
+
+h1 {
+    margin-top: 20px;
+    color: #333;
+}
+
+canvas {
+    border: 3px solid #333;
+    background-color: #fff;
+    margin-top: 20px;
+    cursor: crosshair;
+}
+
+button {
+    margin-top: 15px;
+    padding: 10px 20px;
+    font-size: 16px;
+    border-radius: 8px;
+    border: none;
+    background-color: #0078ff;
+    color: white;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+button:hover {
+    background-color: #005ecb;
+}
+
+#result {
+    margin-top: 20px;
+    font-size: 24px;
+    font-weight: bold;
+    color: #222;
+}
+
+
+
+================================================================================
+# .\kubernetes\cadvisor.yaml
+================================================================================
+
+# kubernetes/cadvisor.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cadvisor
+  labels:
+    app: cadvisor
+spec:
+  selector:
+    matchLabels:
+      app: cadvisor
+  template:
+    metadata:
+      labels:
+        app: cadvisor
+    spec:
+      containers:
+      - name: cadvisor
+        image: gcr.io/cadvisor/cadvisor:latest
+        resources:
+          limits:
+            cpu: 300m
+            memory: 400Mi
+          requests:
+            cpu: 150m
+            memory: 200Mi
+        volumeMounts:
+        - name: rootfs
+          mountPath: /rootfs
+          readOnly: true
+        - name: var-run
+          mountPath: /var/run
+          readOnly: true
+        - name: sys
+          mountPath: /sys
+          readOnly: true
+        - name: docker
+          mountPath: /var/lib/docker
+          readOnly: true
+        - name: disk
+          mountPath: /dev/disk
+          readOnly: true
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: rootfs
+        hostPath:
+          path: /
+      - name: var-run
+        hostPath:
+          path: /var/run
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: docker
+        hostPath:
+          path: /var/lib/docker
+      - name: disk
+        hostPath:
+          path: /dev/disk
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cadvisor
+spec:
+  selector:
+    app: cadvisor
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+
+
+================================================================================
+# .\kubernetes\deploy.ps1
+================================================================================
+
+# kubernetes/deploy.ps1
+$ErrorActionPreference = "Stop"
+$ClusterName = "ml-app-cluster"
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Creating Kind cluster: $ClusterName" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+kind create cluster --config kubernetes/kind-config.yaml --name $ClusterName
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Building local Docker images..." -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+docker build -t ml-api:latest .
+docker build -t nginx-frontend:latest -f nginx/Dockerfile .
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Loading Docker images into Kind cluster..." -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+kind load docker-image ml-api:latest --name $ClusterName
+kind load docker-image nginx-frontend:latest --name $ClusterName
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Applying Kubernetes manifests..." -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+kubectl apply -f kubernetes/ml-api.yaml
+kubectl apply -f kubernetes/nginx.yaml
+kubectl apply -f kubernetes/prometheus.yaml
+kubectl apply -f kubernetes/loki.yaml
+kubectl apply -f kubernetes/promtail.yaml
+kubectl apply -f kubernetes/grafana.yaml
+kubectl apply -f kubernetes/cadvisor.yaml
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Installing Jenkins via Helm..." -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+# Add Jenkins Helm Repo
+helm repo add jenkins https://charts.jenkins.io
+helm repo update
+
+# Ensure the Docker Hub credentials secret exists for Jenkins
+kubectl create namespace jenkins --dry-run=client -o yaml | kubectl apply -f -
+
+if ($env:DOCKER_HUB_USERNAME -and $env:DOCKER_HUB_PASSWORD) {
+  kubectl create secret generic docker-hub-creds `
+    --namespace jenkins `
+    --from-literal=username=$env:DOCKER_HUB_USERNAME `
+    --from-literal=password=$env:DOCKER_HUB_PASSWORD `
+    --dry-run=client -o yaml | kubectl apply -f -
+} else {
+  kubectl create secret generic docker-hub-creds `
+    --namespace jenkins `
+    --from-literal=username='changeme' `
+    --from-literal=password='changeme' `
+    --dry-run=client -o yaml | kubectl apply -f -
+}
+
+# Install Jenkins
+helm upgrade --install jenkins jenkins/jenkins `
+  --namespace jenkins `
+  --create-namespace `
+  -f kubernetes/jenkins-values.yaml
+
+# Apply ClusterRoleBinding for Jenkins
+kubectl apply -f kubernetes/jenkins-rbac.yaml
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Waiting for deployments to roll out..." -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+kubectl rollout status deployment/ml-api
+kubectl rollout status deployment/nginx
+kubectl rollout status deployment/prometheus
+kubectl rollout status deployment/loki
+kubectl rollout status deployment/grafana
+kubectl rollout status statefulset/jenkins -n jenkins
+
+Write-Host "==========================================" -ForegroundColor Green
+Write-Host "Setup complete! Access services at:" -ForegroundColor Green
+Write-Host "  - Frontend: http://localhost:80 (via http://127.0.0.1:80)" -ForegroundColor Green
+Write-Host "  - Grafana:  http://localhost:3000 (via http://127.0.0.1:3000)" -ForegroundColor Green
+Write-Host "  - Jenkins:  http://localhost:8080 (via http://127.0.0.1:8080)" -ForegroundColor Green
+Write-Host "==========================================" -ForegroundColor Green
+
+
+
+================================================================================
+# .\kubernetes\deploy.sh
+================================================================================
+
+#!/usr/bin/env bash
+set -e
+
+# Define cluster name
+CLUSTER_NAME="ml-app-cluster"
+
+echo "=========================================="
+echo "Creating Kind cluster: $CLUSTER_NAME"
+echo "=========================================="
+kind create cluster --config kubernetes/kind-config.yaml --name $CLUSTER_NAME
+
+echo "=========================================="
+echo "Building local Docker images..."
+echo "=========================================="
+docker build -t ml-api:latest .
+docker build -t nginx-frontend:latest -f nginx/Dockerfile .
+
+echo "=========================================="
+echo "Loading Docker images into Kind cluster..."
+echo "=========================================="
+kind load docker-image ml-api:latest --name $CLUSTER_NAME
+kind load docker-image nginx-frontend:latest --name $CLUSTER_NAME
+
+echo "=========================================="
+echo "Applying Kubernetes manifests..."
+echo "=========================================="
+kubectl apply -f kubernetes/ml-api.yaml
+kubectl apply -f kubernetes/nginx.yaml
+kubectl apply -f kubernetes/prometheus.yaml
+kubectl apply -f kubernetes/loki.yaml
+kubectl apply -f kubernetes/promtail.yaml
+kubectl apply -f kubernetes/grafana.yaml
+kubectl apply -f kubernetes/cadvisor.yaml
+
+echo "=========================================="
+echo "Installing Jenkins via Helm..."
+echo "=========================================="
+# Add Jenkins Helm Repo
+helm repo add jenkins https://charts.jenkins.io
+helm repo update
+
+# Ensure the Docker Hub credentials secret exists for Jenkins
+kubectl create namespace jenkins --dry-run=client -o yaml | kubectl apply -f -
+if [ -n "${DOCKER_HUB_USERNAME:-}" ] && [ -n "${DOCKER_HUB_PASSWORD:-}" ]; then
+  kubectl create secret generic docker-hub-creds \
+    --namespace jenkins \
+    --from-literal=username="$DOCKER_HUB_USERNAME" \
+    --from-literal=password="$DOCKER_HUB_PASSWORD" \
+    --dry-run=client -o yaml | kubectl apply -f -
+else
+  kubectl create secret generic docker-hub-creds \
+    --namespace jenkins \
+    --from-literal=username='changeme' \
+    --from-literal=password='changeme' \
+    --dry-run=client -o yaml | kubectl apply -f -
+fi
+
+# Install Jenkins
+helm upgrade --install jenkins jenkins/jenkins \
+  --namespace jenkins \
+  --create-namespace \
+  -f kubernetes/jenkins-values.yaml
+
+# Apply ClusterRoleBinding for Jenkins
+kubectl apply -f kubernetes/jenkins-rbac.yaml
+
+echo "=========================================="
+echo "Waiting for deployments to roll out..."
+echo "=========================================="
+kubectl rollout status deployment/ml-api
+kubectl rollout status deployment/nginx
+kubectl rollout status deployment/prometheus
+kubectl rollout status deployment/loki
+kubectl rollout status deployment/grafana
+kubectl rollout status statefulset/jenkins -n jenkins
+
+echo "=========================================="
+echo "Setup complete! Access services at:"
+echo "  - Frontend: http://localhost:80 (via http://127.0.0.1:80)"
+echo "  - Grafana:  http://localhost:3000 (via http://127.0.0.1:3000)"
+echo "  - Jenkins:  http://localhost:8080 (via http://127.0.0.1:8080)"
+echo "=========================================="
+
+
+
+================================================================================
+# .\kubernetes\grafana.yaml
+================================================================================
+
+# kubernetes/grafana.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: true
+
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki:3100
+        editable: true
+        jsonData:
+          maxLines: 1000
+          derivedFields:
+            - datasourceUid: Prometheus
+              matcherRegex: "trace_id=(\\w+)"
+              name: TraceID
+              url: "$${__value.raw}"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        fsGroup: 472 # grafana default user runs with group ID 472, needed for persistent volume writes
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        volumeMounts:
+        - name: datasources-volume
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: storage-volume
+          mountPath: /var/lib/grafana
+      volumes:
+      - name: datasources-volume
+        configMap:
+          name: grafana-datasources
+      - name: storage-volume
+        persistentVolumeClaim:
+          claimName: grafana-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  selector:
+    app: grafana
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000
+    nodePort: 30300
+  type: NodePort
+
+
+
+================================================================================
+# .\kubernetes\jenkins-rbac.yaml
+================================================================================
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: jenkins-admin-cluster-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-admin
+    namespace: jenkins
+
+
+
+================================================================================
+# .\kubernetes\jenkins-values.yaml
+================================================================================
+
+# kubernetes/jenkins-values.yaml
+serviceAccount:
+  create: true
+  name: "jenkins-admin"  # Must match the name in jenkins-rbac.yaml
+
+controller:
+  componentName: "jenkins-controller"
+  image:
+    registry: docker.io
+    repository: jenkins/jenkins
+    tag: "lts-jdk21"
+    pullPolicy: IfNotPresent
+
+  # Expose Jenkins UI via NodePort 30088
+  serviceType: "NodePort"
+  servicePort: 8080
+  nodePort: 30088
+  agentListenerPort: 50000
+
+  # Install required plugins (no ":latest" — Jenkins Plugin CLI does not support that specifier)
+  installPlugins:
+    - "kubernetes"
+    - "workflow-aggregator"
+    - "git"
+    - "configuration-as-code"
+  installLatestPlugins: true
+
+  # Default admin user configuration
+  admin:
+    username: "admin"
+    password: "admin"
+
+  # Pass Docker Hub credentials from a Kubernetes Secret into the controller environment
+  extraEnvs:
+    - name: DOCKER_HUB_USER
+      valueFrom:
+        secretKeyRef:
+          name: docker-hub-creds
+          key: username
+          optional: true
+    - name: DOCKER_HUB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: docker-hub-creds
+          key: password
+          optional: true
+
+  # Pre-configure Jenkins using JCasC
+  JCasC:
+    enabled: true
+    configScripts:
+      docker-hub-credentials: |
+        credentials:
+          system:
+            domainCredentials:
+              - credentials:
+                  - usernamePassword:
+                      scope: GLOBAL
+                      id: "docker-hub-credentials"
+                      username: "${DOCKER_HUB_USER}"
+                      password: "${DOCKER_HUB_PASSWORD}"
+                      description: "Docker Hub Credentials for Pipeline"
+      kubernetes-agents: |
+        jenkins:
+          clouds:
+            - kubernetes:
+                name: "kubernetes"
+                serverUrl: "https://kubernetes.default.svc.cluster.local"
+                jenkinsUrl: "http://jenkins.jenkins.svc.cluster.local:8080"
+                templates:
+                  - name: "jenkins-agent"
+                    label: "jenkins-agent"
+                    nodeUsageMode: "EXCLUSIVE"
+                    containers:
+                      - name: "jnlp"
+                        image: "jenkins/inbound-agent:latest"
+                      - name: "python"
+                        image: "python:3.9-slim"
+                        command: "sleep"
+                        args: "99d"
+                      - name: "docker"
+                        image: "docker:cli"
+                        command: "sleep"
+                        args: "99d"
+                        # No nested volumeMounts here — the pod-level hostPathVolume
+                        # below already mounts docker.sock into every container
+                      - name: "kubectl"
+                        image: "bitnami/kubectl:latest"
+                        command: "sleep"
+                        args: "99d"
+                    volumes:
+                      - hostPathVolume:
+                          # Mounts the host Docker socket into ALL containers in the pod
+                          hostPath: "/var/run/docker.sock"
+                          mountPath: "/var/run/docker.sock"
+
+
+
+================================================================================
+# .\kubernetes\kind-config.yaml
+================================================================================
+
+# kubernetes/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  # Map host port 80 to NodePort 30080 (Nginx Frontend)
+  - containerPort: 30080
+    hostPort: 80
+    listenAddress: "127.0.0.1"
+    protocol: TCP
+  # Map host port 3000 to NodePort 30300 (Grafana Dashboard)
+  - containerPort: 30300
+    hostPort: 3000
+    listenAddress: "127.0.0.1"
+    protocol: TCP
+  # Map host port 8080 to NodePort 30088 (Jenkins UI)
+  - containerPort: 30088
+    hostPort: 8080
+    listenAddress: "127.0.0.1"
+    protocol: TCP
+  extraMounts:
+  - hostPath: /var/run/docker.sock
+    containerPath: /var/run/docker.sock
+- role: worker
+  extraMounts:
+  - hostPath: /var/run/docker.sock
+    containerPath: /var/run/docker.sock
+
+
+
+
+================================================================================
+# .\kubernetes\loki.yaml
+================================================================================
+
+# kubernetes/loki.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+data:
+  loki-config.yaml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+      log_level: info
+
+    common:
+      instance_addr: 0.0.0.0
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+
+    ingester:
+      chunk_idle_period: 5m
+      chunk_retain_period: 30s
+
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+
+    storage_config:
+      tsdb_shipper:
+        active_index_directory: /loki/tsdb-index
+        cache_location: /loki/tsdb-cache
+      filesystem:
+        directory: /loki/chunks
+
+    limits_config:
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+      max_entries_limit_per_query: 5000
+      allow_structured_metadata: true
+      retention_period: 720h  # 30 days retention
+
+    compactor:
+      working_directory: /loki/compactor
+
+    ruler:
+      alertmanager_url: http://localhost:9093
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: loki-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  labels:
+    app: loki
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+    spec:
+      securityContext:
+        fsGroup: 10001 # grafana/loki run as user 10001, so we need this to mount the volume with correct permissions
+      containers:
+      - name: loki
+        image: grafana/loki:latest
+        args:
+        - "-config.file=/etc/loki/loki-config.yaml"
+        ports:
+        - containerPort: 3100
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/loki
+        - name: storage-volume
+          mountPath: /loki
+      volumes:
+      - name: config-volume
+        configMap:
+          name: loki-config
+      - name: storage-volume
+        persistentVolumeClaim:
+          claimName: loki-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+spec:
+  selector:
+    app: loki
+  ports:
+  - protocol: TCP
+    port: 3100
+    targetPort: 3100
+  type: ClusterIP
+
+
+
+================================================================================
+# .\kubernetes\ml-api.yaml
+================================================================================
+
+# kubernetes/ml-api.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-api
+  labels:
+    app: ml-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-api
+  template:
+    metadata:
+      labels:
+        app: ml-api
+    spec:
+      containers:
+      - name: ml-api
+        image: ml-api:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+---
+# Service for Prometheus scraping
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-api
+spec:
+  selector:
+    app: ml-api
+  ports:
+  - protocol: TCP
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP
+---
+# Service for Nginx reverse proxy
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+spec:
+  selector:
+    app: ml-api
+  ports:
+  - protocol: TCP
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP
+
+
+
+================================================================================
+# .\kubernetes\nginx.yaml
+================================================================================
+
+# kubernetes/nginx.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  labels:
+    app: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx-frontend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  selector:
+    app: nginx
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    nodePort: 30080
+  type: NodePort
+
+
+
+================================================================================
+# .\kubernetes\prometheus.yaml
+================================================================================
+
+# kubernetes/prometheus.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+
+    scrape_configs:
+      - job_name: "prometheus"
+        static_configs:
+          - targets: ["localhost:9090"]
+
+      - job_name: "cadvisor"
+        static_configs:
+          - targets: ["cadvisor:8080"]
+
+      - job_name: "ml-api"
+        static_configs:
+          - targets: ["ml-api:8000"]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        args:
+        - "--config.file=/etc/prometheus/prometheus.yml"
+        - "--storage.tsdb.path=/prometheus"
+        ports:
+        - containerPort: 9090
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/prometheus
+        - name: storage-volume
+          mountPath: /prometheus
+      volumes:
+      - name: config-volume
+        configMap:
+          name: prometheus-config
+      - name: storage-volume
+        persistentVolumeClaim:
+          claimName: prometheus-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+spec:
+  selector:
+    app: prometheus
+  ports:
+  - protocol: TCP
+    port: 9090
+    targetPort: 9090
+  type: ClusterIP
+
+
+
+================================================================================
+# .\kubernetes\promtail.yaml
+================================================================================
+
+# kubernetes/promtail.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: promtail
+  labels:
+    app: promtail
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: promtail
+  labels:
+    app: promtail
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/proxy
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: promtail
+  labels:
+    app: promtail
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: promtail
+subjects:
+- kind: ServiceAccount
+  name: promtail
+  namespace: default
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+data:
+  promtail-config.yaml: |
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+
+    positions:
+      filename: /run/promtail/positions.yaml
+
+    clients:
+      - url: http://loki:3100/loki/api/v1/push
+        batchwait: 1s
+        batchsize: 1048576
+        timeout: 10s
+
+    scrape_configs:
+      - job_name: kubernetes-pods
+        kubernetes_sd_configs:
+          - role: pod
+        pipeline_stages:
+          - cri: {}
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - source_labels: [__meta_kubernetes_pod_label_service]
+            target_label: service
+          - replacement: /var/log/pods/*$1/*.log
+            separator: /
+            source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+            target_label: __path__
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  labels:
+    app: promtail
+spec:
+  selector:
+    matchLabels:
+      app: promtail
+  template:
+    metadata:
+      labels:
+        app: promtail
+    spec:
+      serviceAccountName: promtail
+      containers:
+      - name: promtail
+        image: grafana/promtail:latest
+        args:
+        - "-config.file=/etc/promtail/promtail-config.yaml"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/promtail
+        - name: pod-logs
+          mountPath: /var/log/pods
+          readOnly: true
+        - name: container-logs
+          mountPath: /var/log/containers
+          readOnly: true
+        - name: positions
+          mountPath: /run/promtail
+        securityContext:
+          privileged: true
+          runAsUser: 0
+      volumes:
+      - name: config-volume
+        configMap:
+          name: promtail-config
+      - name: pod-logs
+        hostPath:
+          path: /var/log/pods
+      - name: container-logs
+        hostPath:
+          path: /var/log/containers
+      - name: positions
+        emptyDir: {}
+
+
+
+================================================================================
+# .\model\rf_model.joblib
+================================================================================
+
+<binary file>
+
+
+================================================================================
+# .\model\train.py
+================================================================================
+
+from sklearn.datasets import load_digits
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+import joblib
+
+def main():
+    digits = load_digits()
+    X, y = digits.data, digits.target
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    clf = RandomForestClassifier(n_estimators=100, random_state=42)
+    clf.fit(X_train, y_train)
+
+    preds = clf.predict(X_test)
+    acc = accuracy_score(y_test, preds)
+    print(f"Test accuracy: {acc:.4f}")
+
+    # Save model
+    joblib.dump(clf, "rf_model.joblib")
+    print("Saved RandomForest model to rf_model.joblib")
+
+if __name__ == "__main__":
+    main()
+
+
+================================================================================
+# .\nginx\default.conf
+================================================================================
+
+server {
+    listen 80;
+
+    location / {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://backend:8000/;
+    }
+}
+
+
+================================================================================
+# .\nginx\Dockerfile
+================================================================================
+
+FROM nginx:latest
+
+COPY ./frontend /usr/share/nginx/html
+COPY ./nginx /etc/nginx/conf.d
+
+
+================================================================================
+# .\tests\test_api.py
+================================================================================
+
+import pytest
+from httpx import AsyncClient
+from httpx import ASGITransport
+from api.main import app
+
+@pytest.mark.asyncio
+async def test_home():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.get("/")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_predict():
+    transport = ASGITransport(app=app)
+    dummy = {"pixels": [0.0]*64}  # 64 pixels for 8x8 image
+
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post("/predict", json=dummy)
+
+    assert response.status_code == 200
+
+
+================================================================================
+# .\tests\__init__.py
+================================================================================
+
+
+

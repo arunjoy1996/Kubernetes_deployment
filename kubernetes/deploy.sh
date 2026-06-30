@@ -39,6 +39,22 @@ echo "=========================================="
 helm repo add jenkins https://charts.jenkins.io
 helm repo update
 
+# Ensure the Docker Hub credentials secret exists for Jenkins
+kubectl create namespace jenkins --dry-run=client -o yaml | kubectl apply -f -
+if [ -n "${DOCKER_HUB_USERNAME:-}" ] && [ -n "${DOCKER_HUB_PASSWORD:-}" ]; then
+  kubectl create secret generic docker-hub-creds \
+    --namespace jenkins \
+    --from-literal=username="$DOCKER_HUB_USERNAME" \
+    --from-literal=password="$DOCKER_HUB_PASSWORD" \
+    --dry-run=client -o yaml | kubectl apply -f -
+else
+  kubectl create secret generic docker-hub-creds \
+    --namespace jenkins \
+    --from-literal=username='changeme' \
+    --from-literal=password='changeme' \
+    --dry-run=client -o yaml | kubectl apply -f -
+fi
+
 # Install Jenkins
 helm upgrade --install jenkins jenkins/jenkins \
   --namespace jenkins \

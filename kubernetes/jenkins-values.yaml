@@ -5,8 +5,11 @@ serviceAccount:
 
 controller:
   componentName: "jenkins-controller"
-  image: "jenkins/jenkins"
-  tag: "lts"
+  image:
+    registry: docker.io
+    repository: jenkins/jenkins
+    tag: "lts-jdk21"
+    pullPolicy: IfNotPresent
 
   # Expose Jenkins UI via NodePort 30088
   serviceType: "NodePort"
@@ -23,8 +26,9 @@ controller:
   installLatestPlugins: true
 
   # Default admin user configuration
-  adminUser: "admin"
-  adminPassword: "admin"
+  admin:
+    username: "admin"
+    password: "admin"
 
   # Pass Docker Hub credentials from a Kubernetes Secret into the controller environment
   extraEnvs:
