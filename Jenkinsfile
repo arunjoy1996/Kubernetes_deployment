@@ -84,6 +84,29 @@ pipeline {
                 }
             }
         }
+        stage('Docker Test') {
+            steps {
+                container('docker') {
+                    sh '''
+                    echo DOCKER_OK
+                    which sh || true
+                    which docker || true
+                    '''
+                }
+            }
+        }
+
+        stage('Kubectl Test') {
+            steps {
+                container('kubectl') {
+                    sh '''
+                    echo KUBECTL_OK
+                    which sh || true
+                    which kubectl || true
+                    '''
+                }
+            }
+        }
         stage('Deploy') {
             steps {
                 container('kubectl') {
