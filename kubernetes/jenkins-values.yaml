@@ -21,10 +21,16 @@ controller:
 
   # Install required plugins (no ":latest" — Jenkins Plugin CLI does not support that specifier)
   installPlugins:
-    - "kubernetes"
-    - "workflow-aggregator"
-    - "git"
-    - "configuration-as-code"
+  - "kubernetes"
+  - "kubernetes-client-api"
+  - "kubernetes-credentials-provider"
+  - "workflow-aggregator"
+  - "workflow-durable-task-step"
+  - "durable-task"
+  - "git"
+  - "git-client"
+  - "credentials-binding"
+  - "configuration-as-code"
   installLatestPlugins: true
 
   # Default admin user configuration
