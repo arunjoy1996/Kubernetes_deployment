@@ -100,9 +100,8 @@ pipeline {
             steps {
                 container('kubectl') {
                     sh '''
-                    echo KUBECTL_OK
-                    which sh || true
-                    which kubectl || true
+                    echo TEST
+                    which sh
                     '''
                 }
             }
