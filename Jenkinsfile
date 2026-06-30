@@ -35,22 +35,43 @@ pipeline {
                 }
             }
         }
-
+        stage('Debug') {
+            steps {
+                container('docker') {
+                    sh '''
+                    echo "Container started"
+                    whoami
+                    pwd
+                    ls -la
+                    which sh
+                    which docker
+                    docker version || true
+                    '''
+                }
+            }
+        }
         stage('Build & Push') {
             steps {
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
+                        set -e
+                        export IMAGE_TAG="${BUILD_NUMBER:-latest}"
+
+                        echo "Checking Docker access..."
+                        docker version
+                        docker ps --format '{{.Names}}' || true
+
                         echo "Logging in to Docker Hub..."
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
 
                         echo "Building Docker images..."
-                        docker build -t "$DOCKER_USER/ml-api:latest" .
-                        docker build -t "$DOCKER_USER/nginx-frontend:latest" -f nginx/Dockerfile .
+                        docker build -t "$DOCKER_USER/ml-api:${IMAGE_TAG}" .
+                        docker build -t "$DOCKER_USER/nginx-frontend:${IMAGE_TAG}" -f nginx/Dockerfile .
 
                         echo "Pushing images to Docker Hub..."
-                        docker push "$DOCKER_USER/ml-api:latest"
-                        docker push "$DOCKER_USER/nginx-frontend:latest"
+                        docker push "$DOCKER_USER/ml-api:${IMAGE_TAG}"
+                        docker push "$DOCKER_USER/nginx-frontend:${IMAGE_TAG}"
                         '''
                     }
                 }
@@ -62,9 +83,12 @@ pipeline {
                 container('kubectl') {
                     withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
+                        set -e
+                        export IMAGE_TAG="${BUILD_NUMBER:-latest}"
+
                         echo "Updating manifests with Docker Hub images..."
-                        sed -i "s|image: ml-api:latest|image: ${DOCKER_USER}/ml-api:latest|g" kubernetes/ml-api.yaml
-                        sed -i "s|image: nginx-frontend:latest|image: ${DOCKER_USER}/nginx-frontend:latest|g" kubernetes/nginx.yaml
+                        sed -Ei "s|image: .*ml-api.*|image: ${DOCKER_USER}/ml-api:${IMAGE_TAG}|g" kubernetes/ml-api.yaml
+                        sed -Ei "s|image: .*nginx-frontend.*|image: ${DOCKER_USER}/nginx-frontend:${IMAGE_TAG}|g" kubernetes/nginx.yaml
 
                         echo "Applying Kubernetes manifests..."
                         kubectl apply -f kubernetes/ml-api.yaml
@@ -84,4 +108,4 @@ pipeline {
             }
         }
     }
-}
+}
