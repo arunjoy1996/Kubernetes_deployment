@@ -85,10 +85,11 @@ controller:
                         # No nested volumeMounts here — the pod-level hostPathVolume
                         # below already mounts docker.sock into every container
                       - name: "kubectl"
-                        image: "alpine:latest"
+                        image: "bitnami/kubectl:latest"
                         command:
-                          - cat
-                        ttyEnabled: true
+                          - "sleep"
+                        args:
+                          - "99d"
                     volumes:
                       - hostPathVolume:
                           # Mounts the host Docker socket into ALL containers in the pod
