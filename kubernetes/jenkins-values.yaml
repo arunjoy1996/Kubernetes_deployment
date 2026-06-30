@@ -1,0 +1,91 @@
+# kubernetes/jenkins-values.yaml
+serviceAccount:
+  create: true
+  name: "jenkins-admin"  # Must match the name in jenkins-rbac.yaml
+
+controller:
+  componentName: "jenkins-controller"
+  image: "jenkins/jenkins"
+  tag: "lts"
+
+  # Expose Jenkins UI via NodePort 30088
+  serviceType: "NodePort"
+  servicePort: 8080
+  nodePort: 30088
+  agentListenerPort: 50000
+
+  # Install required plugins (no ":latest" — Jenkins Plugin CLI does not support that specifier)
+  installPlugins:
+    - "kubernetes"
+    - "workflow-aggregator"
+    - "git"
+    - "configuration-as-code"
+  installLatestPlugins: true
+
+  # Default admin user configuration
+  adminUser: "admin"
+  adminPassword: "admin"
+
+  # Pass Docker Hub credentials from a Kubernetes Secret into the controller environment
+  extraEnvs:
+    - name: DOCKER_HUB_USER
+      valueFrom:
+        secretKeyRef:
+          name: docker-hub-creds
+          key: username
+          optional: true
+    - name: DOCKER_HUB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: docker-hub-creds
+          key: password
+          optional: true
+
+  # Pre-configure Jenkins using JCasC
+  JCasC:
+    enabled: true
+    configScripts:
+      docker-hub-credentials: |
+        credentials:
+          system:
+            domainCredentials:
+              - credentials:
+                  - usernamePassword:
+                      scope: GLOBAL
+                      id: "docker-hub-credentials"
+                      username: "${DOCKER_HUB_USER}"
+                      password: "${DOCKER_HUB_PASSWORD}"
+                      description: "Docker Hub Credentials for Pipeline"
+      kubernetes-agents: |
+        jenkins:
+          clouds:
+            - kubernetes:
+                name: "kubernetes"
+                serverUrl: "https://kubernetes.default.svc.cluster.local"
+                jenkinsUrl: "http://jenkins.jenkins.svc.cluster.local:8080"
+                templates:
+                  - name: "jenkins-agent"
+                    label: "jenkins-agent"
+                    nodeUsageMode: "EXCLUSIVE"
+                    containers:
+                      - name: "jnlp"
+                        image: "jenkins/inbound-agent:latest"
+                      - name: "python"
+                        image: "python:3.9-slim"
+                        command: "sleep"
+                        args: "99d"
+                      - name: "docker"
+                        image: "docker:cli"
+                        command: "sleep"
+                        args: "99d"
+                        # No nested volumeMounts here — the pod-level hostPathVolume
+                        # below already mounts docker.sock into every container
+                      - name: "kubectl"
+                        image: "bitnami/kubectl:latest"
+                        command: "sleep"
+                        args: "99d"
+                    volumes:
+                      - hostPathVolume:
+                          # Mounts the host Docker socket into ALL containers in the pod
+                          hostPath: "/var/run/docker.sock"
+                          mountPath: "/var/run/docker.sock"

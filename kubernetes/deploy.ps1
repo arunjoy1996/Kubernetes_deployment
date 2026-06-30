@@ -31,6 +31,22 @@ kubectl apply -f kubernetes/grafana.yaml
 kubectl apply -f kubernetes/cadvisor.yaml
 
 Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Installing Jenkins via Helm..." -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+# Add Jenkins Helm Repo
+helm repo add jenkins https://charts.jenkins.io
+helm repo update
+
+# Install Jenkins
+helm upgrade --install jenkins jenkins/jenkins `
+  --namespace jenkins `
+  --create-namespace `
+  -f kubernetes/jenkins-values.yaml
+
+# Apply ClusterRoleBinding for Jenkins
+kubectl apply -f kubernetes/jenkins-rbac.yaml
+
+Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Waiting for deployments to roll out..." -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 kubectl rollout status deployment/ml-api
@@ -38,9 +54,11 @@ kubectl rollout status deployment/nginx
 kubectl rollout status deployment/prometheus
 kubectl rollout status deployment/loki
 kubectl rollout status deployment/grafana
+kubectl rollout status statefulset/jenkins -n jenkins
 
 Write-Host "==========================================" -ForegroundColor Green
 Write-Host "Setup complete! Access services at:" -ForegroundColor Green
 Write-Host "  - Frontend: http://localhost:80 (via http://127.0.0.1:80)" -ForegroundColor Green
 Write-Host "  - Grafana:  http://localhost:3000 (via http://127.0.0.1:3000)" -ForegroundColor Green
+Write-Host "  - Jenkins:  http://localhost:8080 (via http://127.0.0.1:8080)" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Green

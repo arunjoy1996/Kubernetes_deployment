@@ -80,3 +80,45 @@ Docker Compose volume definitions (`grafana-data`, `prometheus-data`, `loki-data
 Once deployed, the scripts will wait for all Pods to become healthy. You will be able to access:
 - **Web App UI:** [http://localhost](http://localhost)
 - **Grafana Dashboard:** [http://localhost:3000](http://localhost:3000)
+- **Jenkins CI/CD:** [http://localhost:8080](http://localhost:8080) (Log in with username `admin` and password `admin`)
+
+---
+
+## 🧑‍💻 Jenkins CI/CD Pipeline Setup
+
+Jenkins is deployed automatically using the official Helm chart inside the `jenkins` namespace. It is configured to run stages inside dynamic Kubernetes agent pods.
+
+### 1. Configure Docker Hub Credentials
+Before triggering the pipeline (or before running the deployment scripts if you want the credentials ready immediately), create a Kubernetes Secret containing your Docker Hub credentials. Jenkins JCasC will automatically read this secret to configure the credentials in the Jenkins credentials store:
+
+```bash
+# Create the jenkins namespace if it doesn't exist yet
+kubectl create namespace jenkins
+
+# Create the docker-hub-creds secret
+kubectl create secret generic docker-hub-creds \
+  --namespace jenkins \
+  --from-literal=username='YOUR_DOCKER_HUB_USERNAME' \
+  --from-literal=password='YOUR_DOCKER_HUB_PASSWORD_OR_TOKEN'
+```
+
+### 2. How the Pipeline Works
+The [Jenkinsfile](file:///c:/Users/alexu/Documents/Squareroots.ai/Belden/Kubernetes%20Deployment/Deployment_Jenkins/Jenkinsfile) is fully automated to run on a multi-container Kubernetes agent pod (`jenkins-agent`):
+1. **`Test` Stage**: Runs inside a `python` container to install dependencies and execute `pytest` tests.
+2. **`Build & Push` Stage**: Runs inside a `docker` container. It mounts the host's Docker socket to build the images using the host's Docker daemon, logs in to Docker Hub, and pushes them to your Docker Hub repository.
+3. **`Deploy` Stage**: Runs inside a `kubectl` container. It dynamically updates the image references in the Kubernetes manifests (`ml-api.yaml` and `nginx.yaml`) with your Docker Hub username and applies them to the cluster.
+
+### 3. Create the Jenkins Job
+1. Open [http://localhost:8080](http://localhost:8080) and log in using:
+   - **Username:** `admin`
+   - **Password:** `admin`
+2. Click on **New Item**.
+3. Enter a name (e.g., `ml-pipeline`), select **Pipeline**, and click **OK**.
+4. Scroll down to the **Pipeline** section:
+   - **Definition:** Select **Pipeline script from SCM**.
+   - **SCM:** Select **Git**.
+   - **Repository URL:** Enter the path to your repository (or your remote Git URL).
+   - **Branch Specifier:** Set to `*/main` (or whichever branch you are using).
+   - **Script Path:** Ensure it is set to `Jenkinsfile`.
+5. Click **Save** and then click **Build Now** to run the pipeline!
+

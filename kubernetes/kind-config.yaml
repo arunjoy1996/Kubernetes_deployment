@@ -14,4 +14,16 @@ nodes:
     hostPort: 3000
     listenAddress: "127.0.0.1"
     protocol: TCP
+  # Map host port 8080 to NodePort 30088 (Jenkins UI)
+  - containerPort: 30088
+    hostPort: 8080
+    listenAddress: "127.0.0.1"
+    protocol: TCP
+  extraMounts:
+  - hostPath: /var/run/docker.sock
+    containerPath: /var/run/docker.sock
 - role: worker
+  extraMounts:
+  - hostPath: /var/run/docker.sock
+    containerPath: /var/run/docker.sock
+
