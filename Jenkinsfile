@@ -16,12 +16,6 @@ pipeline {
             }
         }
 
-        stage('Debug') {
-            steps {
-                sh 'ls -la'   // should show project structure
-            }
-        }
-
         stage('Test') {
             steps {
                 container('python') {
