@@ -71,6 +71,19 @@ pipeline {
                 }
             }
         }
+        stage('JNLP Test') {
+            steps {
+                sh 'echo JNLP_OK'
+            }
+        }
+
+        stage('Python Test') {
+            steps {
+                container('python') {
+                    sh 'echo PYTHON_OK'
+                }
+            }
+        }
         stage('Deploy') {
             steps {
                 container('kubectl') {
