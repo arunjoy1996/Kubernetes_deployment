@@ -1,6 +1,8 @@
 name: Build-Test-Deploy
 
 on:
+  workflow_dispatch:
+    
   push:
     branches:
       - github-actions
@@ -22,7 +24,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install -r api/requirements.txt
+          pip install -r ./requirements.txt
 
       - name: Run Tests
         run: |
