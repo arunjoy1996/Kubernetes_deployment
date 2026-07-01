@@ -1,5 +1,4 @@
 model/MNIST
-
 __pycache__
 .git
 .gitignore
