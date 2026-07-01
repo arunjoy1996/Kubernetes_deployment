@@ -2,7 +2,7 @@ name: Build-Test-Deploy
 
 on:
   workflow_dispatch:
-    
+
   push:
     branches:
       - github-actions
@@ -36,16 +36,16 @@ jobs:
 
       - name: Build Nginx Image
         run: |
-          docker build \
-            -t nginx-frontend:latest \
+          docker build `
+            -t nginx-frontend:latest `
             -f nginx/Dockerfile .
 
       - name: Load Images Into Kind
         run: |
-          kind load docker-image ml-api:latest \
+          kind load docker-image ml-api:latest `
             --name ml-app-cluster
 
-          kind load docker-image nginx-frontend:latest \
+          kind load docker-image nginx-frontend:latest `
             --name ml-app-cluster
 
       - name: Deploy To Kubernetes
