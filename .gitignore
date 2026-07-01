@@ -1,6 +1,7 @@
 # Virtual environments
 venv/
-
+text_converter.py
+repository_dump.txt
 # Python cache
 __pycache__/
 
