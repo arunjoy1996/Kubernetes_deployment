@@ -46,6 +46,7 @@ data:
     server:
       http_listen_port: 9080
       grpc_listen_port: 0
+      log_level: debug
 
     positions:
       filename: /run/promtail/positions.yaml
@@ -75,9 +76,10 @@ data:
             target_label: app
           - source_labels: [__meta_kubernetes_pod_label_service]
             target_label: service
-          - replacement: /var/log/pods/*$1/*$2/*.log
+          - source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
             separator: /
-            source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+            regex: (.*)
+            replacement: /var/log/pods/*$1/*.log
             target_label: __path__
 ---
 apiVersion: apps/v1
@@ -95,10 +97,12 @@ spec:
       labels:
         app: promtail
     spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       serviceAccountName: promtail
       containers:
       - name: promtail
-        image: grafana/promtail:latest
+        image: grafana/promtail:2.9.10
         args:
         - "-config.file=/etc/promtail/promtail-config.yaml"
         volumeMounts:
